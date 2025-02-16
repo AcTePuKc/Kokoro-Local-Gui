@@ -12,6 +12,16 @@ Key Features:
 - Ability to **save** generated audio in WAV or MP3.
 - Automatic cleanup of temporary audio files older than a certain threshold.
 
+## Demo & Usage
+
+Here’s a quick look at **Kokoro TTS Local GUI** in action:
+
+![Text Input Demo](assets/Anim1.gif)
+
+The following animation shows how to adjust parameters and synthesize speech:
+
+![TTS Settings & Playback](assets/Anim2.gif)
+
 ## Requirements
 Below is the recommended environment configuration to run this application:
 
