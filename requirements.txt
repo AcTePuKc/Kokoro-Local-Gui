@@ -1,0 +1,14 @@
+kokoro
+misaki
+torch>=2.1,<2.6
+torchvision>=0.16,<0.21
+torchaudio>=2.1,<2.6
+soundfile
+huggingface-hub
+pydub
+espeakng-loader
+phonemizer-fork
+wheel
+pyside6
+munch
+setuptools
