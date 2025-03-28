@@ -149,6 +149,39 @@ class MyTTSMainWindow(QMainWindow):
         param_layout.addRow("Save Format:", self.save_format_combo)
         row1_layout.addWidget(parameters_group, 1)
 
+        # Advanced Parameters
+        advanced_group = QGroupBox("Advanced Parameters")
+        advanced_layout = QFormLayout(advanced_group)
+
+        # Alpha
+        self.alpha_slider = QDoubleSpinBox()
+        self.alpha_slider.setRange(0.0, 1.0)
+        self.alpha_slider.setSingleStep(0.05)
+        self.alpha_slider.setValue(0.0)
+        advanced_layout.addRow("Alpha:", self.alpha_slider)
+
+        # Beta
+        self.beta_slider = QDoubleSpinBox()
+        self.beta_slider.setRange(0.0, 1.0)
+        self.beta_slider.setSingleStep(0.05)
+        self.beta_slider.setValue(0.0)
+        advanced_layout.addRow("Beta:", self.beta_slider)
+
+        # Diffusion Steps
+        self.diffusion_slider = QSlider(Qt.Horizontal)
+        self.diffusion_slider.setRange(3, 20)
+        self.diffusion_slider.setValue(0)
+        advanced_layout.addRow("Diffusion Steps:", self.diffusion_slider)
+
+        # Embedding Scale
+        self.scale_slider = QDoubleSpinBox()
+        self.scale_slider.setRange(1.0, 3.0)
+        self.scale_slider.setSingleStep(0.1)
+        self.scale_slider.setValue(1.0)
+        advanced_layout.addRow("Embedding Scale:", self.scale_slider)
+
+        row1_layout.addWidget(advanced_group, 1)
+
         # Right: Playback
         playback_group = QGroupBox("Playback")
         playback_layout = QVBoxLayout(playback_group)
