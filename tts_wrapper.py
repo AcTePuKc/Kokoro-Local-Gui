@@ -106,25 +106,28 @@ class KokoroTTSWrapper:
     def save_audio(self, audio_data_numpy, filepath, format='WAV'):
         logger.info(f"Saving to: {filepath}, Format: {format}")
         try:
-            sf.write(filepath, audio_data_numpy, samplerate=22050, format=format.upper())
+            # Convert float32 audio to int16
+            audio_int16 = (audio_data_numpy * 32767).astype(np.int16)
+            sf.write(
+                filepath,
+                audio_int16,
+                samplerate=24000,
+                format=format.upper(),
+                subtype='PCM_16'  # Specify 16-bit integer format
+            )
             logger.info(f"Audio saved: {filepath}")
         except Exception as e:
             logger.exception(f"Error saving to '{filepath}' as {format}:")
             fallback_path = filepath.rsplit('.', 1)[0] + ".wav"
-            sf.write(fallback_path, audio_data_numpy, samplerate=22050, format='WAV')
+            # Convert for fallback as well
+            audio_int16 = (audio_data_numpy * 32767).astype(np.int16)
+            sf.write(
+                fallback_path,
+                audio_int16,
+                samplerate=24000,
+                format='WAV',
+                subtype='PCM_16'
+            )
             logger.info(f"Saved as fallback WAV: {fallback_path}")
             return fallback_path
         return filepath
-
-    def play_audio(self, audio_filepath):
-        if not audio_filepath:
-            logger.warning("No audio file path provided to play_audio.")
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(audio_filepath))
-
-    def set_voice(self, voice_name):
-        self.voice = voice_name
-        print(f"Voice set to: {voice_name}")
-
-    def list_available_voices(self):
-        return list_available_voices()
