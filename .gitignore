@@ -3,3 +3,4 @@ voices
 outputs
 gui.log
 config.json
+tts_wrapper.log
