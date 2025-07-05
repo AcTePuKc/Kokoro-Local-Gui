@@ -144,6 +144,26 @@ class MyTTSMainWindow(QMainWindow):
         self.speed_spin.setValue(1.0)
         param_layout.addRow("Speed:", self.speed_spin)
 
+        # Pitch (as a slider)
+        pitch_layout = QHBoxLayout()
+        self.pitch_slider = QSlider(Qt.Horizontal)
+        self.pitch_slider.setRange(50, 200)  # Represents 0.5 to 2.0
+        self.pitch_slider.setSingleStep(5)
+        self.pitch_slider.setValue(100)  # Default 1.0
+        self.pitch_slider.setTickInterval(10)
+        self.pitch_slider.setTickPosition(QSlider.TicksBelow)
+        self.pitch_value_label = QLabel("1.00")
+        pitch_layout.addWidget(self.pitch_slider)
+        pitch_layout.addWidget(self.pitch_value_label)
+        param_layout.addRow("Pitch:", pitch_layout)
+
+        def update_pitch_label(val):
+            float_val = val / 100.0
+            self.pitch_value_label.setText(f"{float_val:.2f}")
+
+        self.pitch_slider.valueChanged.connect(update_pitch_label)
+        update_pitch_label(self.pitch_slider.value())
+
         self.save_format_combo = QComboBox()
         self.save_format_combo.addItems(["WAV", "MP3"])
         param_layout.addRow("Save Format:", self.save_format_combo)
@@ -243,8 +263,8 @@ class MyTTSMainWindow(QMainWindow):
         self.generation_label = QLabel("Last Generation Time: N/A")
         results_layout.addWidget(self.generation_label)
 
-        self.results_table = QTableWidget(0, 5)
-        self.results_table.setHorizontalHeaderLabels(["Chunk", "Graphemes", "Phonemes", "Play", "Save"])
+        self.results_table = QTableWidget(0, 6)
+        self.results_table.setHorizontalHeaderLabels(["Chunk", "Graphemes", "Phonemes", "Play", "Save", "Ext. Play"])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         results_layout.addWidget(self.results_table)
@@ -339,6 +359,7 @@ class MyTTSMainWindow(QMainWindow):
         if not voice.strip():
             voice = "af_bella"
         speed = float(self.speed_spin.value())
+        pitch = float(self.pitch_slider.value()) / 100.0  # Get pitch from slider
 
         def run_synthesis():
             start_time = time.time()
@@ -346,6 +367,7 @@ class MyTTSMainWindow(QMainWindow):
                 results = self.tts_wrapper.synthesize(
                     text=text,
                     speed=speed,
+                    pitch=pitch,
                     selected_voice=voice
                 )
                 if results:
@@ -402,6 +424,10 @@ class MyTTSMainWindow(QMainWindow):
                     btn_save = QPushButton("Save")
                     btn_save.clicked.connect(partial(self.save_audio, f"{gen_idx}-{i}", chunk.get("filepath", "")))
                     self.results_table.setCellWidget(row, 4, btn_save)
+                    # External Play for chunk (optional, can be left blank or implemented similarly)
+                    btn_ext_play = QPushButton("Ext. Play")
+                    btn_ext_play.clicked.connect(partial(self.play_external, chunk.get("filepath", "")))
+                    self.results_table.setCellWidget(row, 5, btn_ext_play)
 
             # Show combined row
             combined = gen.get("combined", "")
@@ -417,6 +443,9 @@ class MyTTSMainWindow(QMainWindow):
                 btn_save_combined = QPushButton("Save Combined")
                 btn_save_combined.clicked.connect(partial(self.save_audio, f"{gen_idx}-combined", combined))
                 self.results_table.setCellWidget(row, 4, btn_save_combined)
+                btn_ext_play_combined = QPushButton("Ext. Play")
+                btn_ext_play_combined.clicked.connect(partial(self.play_external, combined))
+                self.results_table.setCellWidget(row, 5, btn_ext_play_combined)
 
         # Scroll to last row so you see the newest generation
         row_count = self.results_table.rowCount()
@@ -439,21 +468,40 @@ class MyTTSMainWindow(QMainWindow):
 
     # MEDIA PLAYER LOGIC
     def on_main_play_clicked(self):
-        state = self.media_player.playbackState()
-        if state == QMediaPlayer.PlayingState:
-            logging.info("Already playing.")
+        # The play button should play the most recent synthesized audio (self.current_filepath)
+        # If nothing has been synthesized yet, do nothing.
+        if not self.current_filepath or not os.path.exists(self.current_filepath):
+            logging.warning("No audio file to play. Synthesize something first.")
+            QMessageBox.information(self, "No Audio", "No audio file to play. Please synthesize text first.")
             return
+
+        state = self.media_player.playbackState()
+        # If already playing, restart from beginning
+        if state == QMediaPlayer.PlayingState:
+            logging.info("Restarting playback from beginning.")
+            self.media_player.stop()
+            self.media_player.setSource(QUrl.fromLocalFile(self.current_filepath))
+            self.media_player.play()
+            self.waveform_widget.set_file(self.current_filepath)
+            return
+        # If paused, resume
         if state == QMediaPlayer.PausedState:
             logging.info("Resuming from paused.")
             self.media_player.play()
             return
-        if self.current_filepath:
-            logging.info(f"Playing last file from start: {self.current_filepath}")
-            self.media_player.stop()
-            self.media_player.setSource(QUrl.fromLocalFile(self.current_filepath))
-            self.media_player.play()
-        else:
-            logging.warning("No file to play.")
+        # If stopped or idle, play from start
+        logging.info(f"Playing last file from start: {self.current_filepath}")
+        self.media_player.stop()
+        self.media_player.setSource(QUrl.fromLocalFile(self.current_filepath))
+        self.media_player.play()
+        self.waveform_widget.set_file(self.current_filepath)
+
+    def play_external(self, filepath):
+        from PySide6.QtGui import QDesktopServices
+        if not filepath or not os.path.exists(filepath):
+            QMessageBox.warning(self, "File Not Found", f"Audio file not found:\n{filepath}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(filepath)))
 
     def play_audio(self, filepath=None):
         if not filepath or not os.path.exists(filepath):
