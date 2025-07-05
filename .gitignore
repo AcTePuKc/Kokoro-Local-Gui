@@ -1,0 +1,5 @@
+.venv
+voices
+outputs
+gui.log
+config.json
