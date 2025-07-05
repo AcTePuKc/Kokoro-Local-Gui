@@ -11,6 +11,8 @@ import time
 import logging
 import error_handler
 
+import librosa  # For pitch shifting
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 file_handler = logging.FileHandler('tts_wrapper.log', encoding='utf-8')
@@ -63,14 +65,15 @@ class KokoroTTSWrapper:
             logger.info(f"Default voice '{self.voice}' loaded.")
         except Exception as e:
             logger.error(f"Could not load default voice '{self.voice}'. Error: {e}")
-    
+
     def synthesize(
             self,
             text: str,
             speed: float = 1.0,
-            selected_voice: Optional[str] = None
+            selected_voice: Optional[str] = None,
+            pitch: float = 1.0
         ) -> Tuple[List[Tuple[str, str, np.ndarray]], Optional[str]]:
-        logger.info(f"Synthesize - Voice: '{selected_voice}', Speed: {speed}, Text: {text[:50]}...")
+        logger.info(f"Synthesize - Voice: '{selected_voice}', Speed: {speed}, Pitch: {pitch}, Text: {text[:50]}...")
         self.last_synthesis_timestamp = time.strftime("%Y%m%d_%H%M%S")
         try:
             load_voice(selected_voice, self.device)
@@ -87,14 +90,50 @@ class KokoroTTSWrapper:
                     audio_data_numpy = audio_tensor.cpu().numpy()
                     if audio_data_numpy.ndim == 1:
                         audio_data_numpy = audio_data_numpy.reshape(-1, 1)
+                    # Pitch shifting (only if pitch != 1.0)
+                    if pitch != 1.0:
+                        # librosa expects mono, float32, sr
+                        sr = 24000
+                        if audio_data_numpy.shape[1] == 1:
+                            # Ensure 1D array for librosa
+                            shifted = librosa.effects.pitch_shift(
+                                audio_data_numpy[:, 0].astype(np.float32), sr=sr, n_steps=12 * np.log2(pitch)
+                            )
+                            audio_data_numpy = shifted[:, None]
+                        else:
+                            # Stereo: process each channel
+                            shifted = []
+                            for ch in range(audio_data_numpy.shape[1]):
+                                shifted_ch = librosa.effects.pitch_shift(
+                                    audio_data_numpy[:, ch].astype(np.float32), sr=sr, n_steps=12 * np.log2(pitch)
+                                )
+                                shifted.append(shifted_ch)
+                            audio_data_numpy = np.stack(shifted, axis=1).T  # Transpose to (N, channels)
                     chunk_filepath = os.path.join(self.temp_dir, f"chunk_{self.last_synthesis_timestamp}_{chunk_index}.wav")
                     self.save_audio(audio_data_numpy, chunk_filepath)
                     synthesis_result_list.append((gs, ps, audio_data_numpy, chunk_filepath))
                     all_audio_tensors.append(audio_tensor)
             if all_audio_tensors:
                 combined_audio_tensor = torch.cat(all_audio_tensors, dim=0)
+                combined_numpy = combined_audio_tensor.cpu().numpy()
+                # Pitch shifting for combined
+                if pitch != 1.0:
+                    sr = 24000
+                    if combined_numpy.ndim == 1 or (combined_numpy.ndim == 2 and combined_numpy.shape[1] == 1):
+                        shifted = librosa.effects.pitch_shift(
+                            combined_numpy.squeeze().astype(np.float32), sr=sr, n_steps=12 * np.log2(pitch)
+                        )
+                        combined_numpy = shifted[:, None] if combined_numpy.ndim == 2 else shifted
+                    else:
+                        shifted = []
+                        for ch in range(combined_numpy.shape[1]):
+                            shifted_ch = librosa.effects.pitch_shift(
+                                combined_numpy[:, ch].astype(np.float32), sr=sr, n_steps=12 * np.log2(pitch)
+                            )
+                            shifted.append(shifted_ch)
+                        combined_numpy = np.stack(shifted, axis=1).T  # Transpose to (N, channels)
                 combined_filepath = os.path.join(self.temp_dir, f"combined_{self.last_synthesis_timestamp}.wav")
-                self.save_audio(combined_audio_tensor.cpu().numpy(), combined_filepath)
+                self.save_audio(combined_numpy, combined_filepath)
                 return synthesis_result_list, combined_filepath
             else:
                 logger.error("No audio chunks generated.")

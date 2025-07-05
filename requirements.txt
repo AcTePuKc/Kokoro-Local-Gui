@@ -12,3 +12,4 @@ wheel
 pyside6
 munch
 setuptools
+librosa
