@@ -1,0 +1,44 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+test.*
+.venv
+*.bkp
+*.wav
+*.mp3
+book_audio/
+.vscode/
+chunks/
+voices
+outputs
+voices.json
+config.json
+config.yaml
+*.npz
+*.bin
+*.onnx
+
+# Logs
+gui.log
+tts_wrapper.log
+
+
+# macOS
+.DS_Store
+
+# book files
+*.epub
+*.txt
+*.pdf
+!requirements.txt
+
+# Test files
+*_test_*
+*_test.py
+*_new.py
+*_old.py
+*.kproj
