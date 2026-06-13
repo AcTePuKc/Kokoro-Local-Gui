@@ -46,7 +46,14 @@ call %VENV_DIR%\Scripts\activate
 echo Installing dependencies...
 uv pip install -r requirements.txt
 
-:: Install correct PyTorch build
+:: Install correct PyTorch build (skip if CUDA torch already works).
+:: Force a clean reinstall with:  run.bat reinstall   (close the app first!)
+%VENV_DIR%\Scripts\python.exe -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" >nul 2>nul
+if %errorlevel% equ 0 if /i not "%~1"=="reinstall" (
+    echo PyTorch with CUDA already installed - skipping reinstall.
+    goto :gpu_ok
+)
+
 echo Installing PyTorch based on CUDA support...
 %VENV_DIR%\Scripts\python.exe install_torch_uv.py
 if %errorlevel% neq 0 (
@@ -64,6 +71,7 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
+:gpu_ok
 :: Check for ffmpeg
 where ffmpeg >nul 2>nul || (
     echo Warning: 'ffmpeg' is not found in your system PATH.
