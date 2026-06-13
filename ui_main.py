@@ -289,17 +289,20 @@ class FileLoaderWorker(QObject):
             self.error.emit(f"Failed to load file: {str(e)}")
 
 
-# ------------------- Main Window v2.0 -------------------
+# ------------------- Main Window v2.0.1 -------------------
 class MyTTSMainWindow(QMainWindow):
     synthesize_args_signal = Signal(object)
 
     def __init__(self, config_path="config.yaml"):
         super().__init__()
-        self.setWindowTitle("Kokoro Studio v2.0")
+        self.setWindowTitle("Kokoro Studio v2.0.1")
         self.resize(1200, 800)
         self.config_path = config_path
         self.config = self._load_config(config_path)
         self.synthesis_results = persistence.load_generations(PERSIST_FILE)
+        self.tts_wrapper = None
+        self.synthesis_thread = None
+        self.synthesis_worker = None
         
         # Audio State
         self.current_filepath = None
@@ -1389,7 +1392,7 @@ class MyTTSMainWindow(QMainWindow):
                     self.book_table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def on_synthesis_finished(self, result):
-        self.setWindowTitle("Kokoro Studio v2.0")
+        self.setWindowTitle("Kokoro Studio v2.0.1")
         self.statusBar().showMessage("Ready.")
         if result:
             chunks_raw, combined = result

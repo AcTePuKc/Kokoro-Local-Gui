@@ -46,11 +46,12 @@ call %VENV_DIR%\Scripts\activate
 echo Installing dependencies...
 uv pip install -r requirements.txt
 
-:: Install correct PyTorch build (skip if CUDA torch already works).
+:: Install correct PyTorch build.
+:: On CPU-only systems, skip reinstall if torch is already present.
 :: Force a clean reinstall with:  run.bat reinstall   (close the app first!)
-%VENV_DIR%\Scripts\python.exe -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)" >nul 2>nul
+%VENV_DIR%\Scripts\python.exe -c "import importlib.util, os, shutil, sys; has_torch = importlib.util.find_spec('torch') is not None; has_gpu = os.path.exists(r'C:\Windows\System32\nvcuda.dll') or shutil.which('nvidia-smi') is not None; cuda_ready = has_torch and ((not has_gpu) or __import__('torch').cuda.is_available()); sys.exit(0 if cuda_ready else 1)" >nul 2>nul
 if %errorlevel% equ 0 if /i not "%~1"=="reinstall" (
-    echo PyTorch with CUDA already installed - skipping reinstall.
+    echo PyTorch already installed and configured correctly - skipping reinstall.
     goto :gpu_ok
 )
 

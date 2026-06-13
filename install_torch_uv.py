@@ -29,23 +29,27 @@ def get_index_url(cuda_version):
 
     print(f"Detected Driver CUDA: {cuda_version}")
 
-    if cuda_version.startswith("13") or cuda_version == "129" or cuda_version == "128":
+    if cuda_version.startswith("13"):
         # PyTorch has no cu13x wheels yet; cu128 stable is forward-compatible
         # with newer drivers and supports modern GPUs (Ada/Blackwell).
         print("ℹ️ Mapping driver to PyTorch CUDA 12.8 wheels (Best Match)")
         return "https://download.pytorch.org/whl/cu128"
+    if cuda_version.isdigit():
+        cuda_value = int(cuda_version)
+        if cuda_value >= 128:
+            print("ℹ️ Mapping driver to PyTorch CUDA 12.8 wheels (Best Match)")
+            return "https://download.pytorch.org/whl/cu128"
+        if cuda_value >= 126:
+            return "https://download.pytorch.org/whl/cu126"
+        if cuda_value >= 124:
+            return "https://download.pytorch.org/whl/cu124"
+        if cuda_value >= 121:
+            return "https://download.pytorch.org/whl/cu121"
+        if cuda_value >= 118:
+            return "https://download.pytorch.org/whl/cu118"
 
-    elif cuda_version == "126":
-        return "https://download.pytorch.org/whl/cu126"
-    elif cuda_version == "124":
-        return "https://download.pytorch.org/whl/cu124"
-    elif cuda_version == "121":
-        return "https://download.pytorch.org/whl/cu121"
-    elif cuda_version == "118":
-        return "https://download.pytorch.org/whl/cu118"
-    else:
-        print(f"⚠️ Unmapped version {cuda_version}. Using CPU.")
-        return "https://download.pytorch.org/whl/cpu"
+    print(f"⚠️ Unmapped version {cuda_version}. Using CPU.")
+    return "https://download.pytorch.org/whl/cpu"
 
 def install_torch(index_url):
     print(f"⚙️ Force-Installing PyTorch from: {index_url}")

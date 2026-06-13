@@ -46,8 +46,18 @@ class KokoroTTSWrapper:
             self.pipeline = build_pipeline(device=self.device)
             logger.info(f"Kokoro Pipeline built successfully on device {self.device}.")
         except Exception as e:
-            logger.exception("Failed to initialize Kokoro pipeline.")
-            raise RuntimeError(f"Failed to initialize TTS engine: {e}") from e
+            if self.device == 'cuda':
+                logger.exception("Failed to initialize Kokoro pipeline on CUDA. Falling back to CPU.")
+                self.device = 'cpu'
+                try:
+                    self.pipeline = build_pipeline(device=self.device)
+                    logger.info("Kokoro Pipeline rebuilt successfully on CPU.")
+                except Exception as cpu_error:
+                    logger.exception("Failed to initialize Kokoro pipeline on CPU after CUDA fallback.")
+                    raise RuntimeError(f"Failed to initialize TTS engine: {cpu_error}") from cpu_error
+            else:
+                logger.exception("Failed to initialize Kokoro pipeline.")
+                raise RuntimeError(f"Failed to initialize TTS engine: {e}") from e
 
         logger.info("KokoroTTSWrapper.__init__ END")
 

@@ -1,10 +1,12 @@
-# Kokoro Studio v2.0 (Local GPU TTS)
+# Kokoro Studio v2.0.1 (Local GPU TTS)
 
 **Kokoro Studio** is a professional-grade, local Text-to-Speech application powered by the **Kokoro-82M** model.
 
 It creates high-quality audio instantly, runs entirely offline, and supports GPU acceleration for blazing-fast synthesis.
 
 > **v2.0 Major Update:** Complete UI overhaul, Audiobook mode, Voice Mixing, Project Saving, and EPUB support!
+
+> **v2.0.1 Patch:** Improved CUDA/PyTorch detection, safer CPU fallback, cleaner reinstall flow, and startup crash fixes.
 
 ## 🚀 Key Features
 
@@ -29,6 +31,22 @@ We have simplified the installation process using `uv` for speed and reliability
 * It will detect your NVIDIA driver version.
 * It will install the correct version of **PyTorch (CUDA)** for your hardware.
 * It will launch the application.
+* If PyTorch is already installed correctly, it will skip reinstalling it.
+
+### Clean Reinstall
+
+If your local environment gets into a bad state, close the app and use one of these:
+
+```bat
+run.bat reinstall
+```
+
+Or remove the local virtual environment and let the launcher rebuild it:
+
+```bat
+rmdir /s /q .venv
+run.bat
+```
 
 ### Option 2: Manual Installation
 
@@ -36,11 +54,11 @@ If you prefer managing your own environment:
 
 ```bash
 # 1. Create and activate a virtual environment
-python -m venv .venv
+uv venv .venv --python python3.11
 .venv\Scripts\activate
 
 # 2. Install basic dependencies
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 
 # 3. (Important) Install GPU-Accelerated PyTorch
 # Run our helper script to fetch the correct CUDA version for your driver:
@@ -86,9 +104,20 @@ The interface is divided into two main tabs:
 
 ## ⚠️ Troubleshooting
 
-* **"Device: CPU (Slow)"**: If the app shows this label in yellow, it means CUDA is not detected. Run `run.bat` again to force a PyTorch reinstall, or ensure you have NVIDIA drivers installed.
+* **"Device: CPU (Slow)"**: If the app shows this label in yellow, CUDA is either not available or the installed PyTorch CUDA build is not compatible with your GPU. Run `run.bat reinstall` to force a PyTorch reinstall, or rebuild from a clean `.venv`.
+* **New NVIDIA GPUs / unsupported CUDA wheel**: Some very new cards may temporarily fail on GPU if the installed PyTorch build does not include kernels for that architecture yet. Kokoro Studio now falls back to CPU instead of crashing, so the app should still start.
 * **Voice Download Error**: On the first run, the app downloads model weights (~300MB) from HuggingFace. Ensure you have an internet connection.
 * **MP3 Issues**: If saving as MP3 fails, ensure `ffmpeg` is installed on your system (though `pydub` often handles this seamlessly).
+
+## Contributors
+
+Thanks to everyone who helped build and improve Kokoro Studio:
+
+| Contributor | Contribution |
+| --- | --- |
+| Shteryan Nikolaev | Project maintainer and core development |
+| WilleIshere | Community code contributions |
+| dsovven | CUDA/PyTorch startup improvements |
 
 ## License
 
