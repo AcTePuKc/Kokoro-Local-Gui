@@ -2,18 +2,12 @@ import sys
 import argparse
 import warnings
 import logging
-from PySide6.QtWidgets import QApplication
-
-# Import the PySide UI
-from ui_main import MyTTSMainWindow
 
 # --- Logging & Warning Setup ---
-# 1. Basic Logging
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# 1. Configure logging (console + rotating gui.log file) and install a global
+#    exception hook FIRST, so that even import-time failures below are recorded.
+from logging_setup import setup_logging
+logger = setup_logging(level=logging.INFO)
 
 # 2. Suppress PyTorch "FutureWarning" (noise)
 warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
@@ -21,6 +15,19 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.modules
 
 # 3. Suppress HuggingFace "Defaulting repo_id" warning
 logging.getLogger("kokoro").setLevel(logging.ERROR)
+
+# 4. Heavy imports are wrapped so a broken install (e.g. missing shiboken6)
+#    is logged to gui.log instead of vanishing as a bare traceback.
+try:
+    from PySide6.QtWidgets import QApplication
+    from ui_main import MyTTSMainWindow
+except Exception as e:
+    logger.critical(f"Failed to import application dependencies: {e}", exc_info=True)
+    logger.critical(
+        "This usually means the virtual environment is incomplete. "
+        "Try reinstalling with: pip install --force-reinstall pyside6"
+    )
+    sys.exit(1)
 
 def main():
     # Setup Argument Parser
