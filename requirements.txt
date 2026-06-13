@@ -6,6 +6,7 @@ pydub
 espeakng-loader
 phonemizer-fork
 pyside6
+pyyaml
 munch
 setuptools
 librosa

@@ -5,11 +5,14 @@ def detect_cuda_version():
     """Засича версията на драйвера от nvidia-smi."""
     try:
         output = subprocess.check_output(["nvidia-smi"], text=True)
-        if "CUDA Version:" in output:
-            part = output.split("CUDA Version:")[1]
-            version = part.split("|")[0].strip()
-            clean_version = version.replace(".", "") 
-            return clean_version
+        # Older drivers print "CUDA Version: 12.4"; newer drivers (e.g. 610.x)
+        # print "CUDA UMD Version: 13.3". Match either form.
+        for marker in ("CUDA UMD Version:", "CUDA Version:"):
+            if marker in output:
+                part = output.split(marker)[1]
+                version = part.split("|")[0].strip()
+                clean_version = version.replace(".", "")
+                return clean_version
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
     
@@ -26,11 +29,14 @@ def get_index_url(cuda_version):
 
     print(f"Detected Driver CUDA: {cuda_version}")
 
-    if cuda_version.startswith("13") or cuda_version == "128" or cuda_version == "126": 
-        # Насочваме всичко ново към 12.6 Nightly (най-стабилното ново)
-        print("ℹ️ Mapping driver to PyTorch CUDA 12.6 wheels (Best Match)")
-        return "https://download.pytorch.org/whl/nightly/cu126"
-    
+    if cuda_version.startswith("13") or cuda_version == "129" or cuda_version == "128":
+        # PyTorch has no cu13x wheels yet; cu128 stable is forward-compatible
+        # with newer drivers and supports modern GPUs (Ada/Blackwell).
+        print("ℹ️ Mapping driver to PyTorch CUDA 12.8 wheels (Best Match)")
+        return "https://download.pytorch.org/whl/cu128"
+
+    elif cuda_version == "126":
+        return "https://download.pytorch.org/whl/cu126"
     elif cuda_version == "124":
         return "https://download.pytorch.org/whl/cu124"
     elif cuda_version == "121":
