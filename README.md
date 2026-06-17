@@ -121,7 +121,8 @@ Thanks to everyone who helped build and improve Kokoro Studio:
 
 ## License
 
-Distributed under the MIT License.
+Distributed under the Apache License 2.0. See `LICENSE` for more information.
 
 ---
-*Based on the amazing [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model.*
+
+*Based on the amazing [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model, also distributed under the Apache License 2.0.*
