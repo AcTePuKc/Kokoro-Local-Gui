@@ -123,6 +123,7 @@ class WaveformWidget(QWidget):
 # ------------------- Worker Thread -------------------
 class SynthesisWorker(QObject):
     progress = Signal(int, int)
+    detail_progress = Signal(str)
     finished = Signal(object) 
     error = Signal(str)
     file_ready = Signal(str, np.ndarray)
@@ -170,19 +171,28 @@ class SynthesisWorker(QObject):
                     raise InterruptedError("Synthesis stopped by user.")
                 self.progress.emit(curr, total)
 
-            # Pass to wrapper
+            def detail_msg(msg):
+                self.detail_progress.emit(msg)
+
             results = self.tts_wrapper.synthesize(
                 segments=segments,
                 speed=speed,
                 pitch=pitch,
                 sample_rate=sample_rate,
                 output_format=output_format,
-                progress_callback=check_stop_progress
+                progress_callback=check_stop_progress,
+                detail_callback=detail_msg
             )
             
             synthesis_result_list, combined_filepath = results
             elapsed = time.time() - self.start_time
             logger.info(f"Worker finished in {elapsed:.2f}s")
+
+            # Strip numpy arrays from signal data (not used by UI, kills perf for cross-thread signal)
+            light_results = (
+                [(g, p, None, fp) for g, p, _, fp in synthesis_result_list],
+                combined_filepath
+            )
 
             # Load waveform if combined file exists
             if combined_filepath and os.path.exists(combined_filepath):
@@ -190,7 +200,7 @@ class SynthesisWorker(QObject):
                 if waveform is not None:
                     self.file_ready.emit(combined_filepath, waveform)
             
-            self.finished.emit(results)
+            self.finished.emit(light_results)
 
         except Exception as e:
             logger.exception("Worker Error")
@@ -199,43 +209,40 @@ class SynthesisWorker(QObject):
             self._is_synthesizing = False
 
     def _load_waveform_data(self, filepath: str) -> Optional[np.ndarray]:
-        """Helper to load waveform safely (supports mp3 via pydub fallback)."""
         if not filepath or not os.path.exists(filepath):
             return None
-            
         try:
-            # Native WAV (Fast)
             if filepath.lower().endswith(".wav"):
                 with wave.open(filepath, "rb") as wav_file:
-                    frames = wav_file.readframes(wav_file.getnframes())
-                    dtype = np.int16 if wav_file.getsampwidth() == 2 else np.uint8
-                    audio_data = np.frombuffer(frames, dtype=dtype)
-                    if dtype == np.int16: 
-                        audio_data = audio_data.astype(np.float32) / 32768.0
-                    else: 
-                        audio_data = (audio_data.astype(np.float32) - 128.0) / 128.0
-                    if wav_file.getnchannels() > 1:
-                        audio_data = audio_data.reshape(-1, wav_file.getnchannels()).mean(axis=1)
-                    
-                    # Normalize
-                    peak = np.max(np.abs(audio_data))
-                    return audio_data / peak if peak > 1e-6 else audio_data
-            
-            # Fallback/MP3 via Pydub
-            audio = AudioSegment.from_file(filepath)
-            if audio.channels > 1: 
+                    nframes = wav_file.getnframes()
+                    sampwidth = wav_file.getsampwidth()
+                    channels = wav_file.getnchannels()
+                    step = max(1, nframes // 2000)
+                    dtype = np.int16 if sampwidth == 2 else np.uint8
+                    frames = wav_file.readframes(nframes)
+                    raw = np.frombuffer(frames, dtype=dtype)
+                    if channels > 1:
+                        raw = raw.reshape(-1, channels)[::step]
+                        downsampled = raw.mean(axis=1, dtype=np.float64).astype(np.float32)
+                    else:
+                        downsampled = raw[::step].astype(np.float32)
+                    if sampwidth == 2:
+                        downsampled /= 32768.0
+                    else:
+                        downsampled = (downsampled - 128.0) / 128.0
+                    peak = np.max(np.abs(downsampled))
+                    return downsampled / peak if peak > 1e-6 else downsampled
+
+            # ponytail: only load first 30s for non-WAV waveform (avoids decoding entire 1hr file)
+            audio = AudioSegment.from_file(filepath, duration=30000)
+            if audio.channels > 1:
                 audio = audio.set_channels(1)
             raw = np.array(audio.get_array_of_samples())
-            
-            # Normalize
-            if audio.sample_width == 2: 
-                max_val = 32768.0
-            else: 
-                max_val = float(2**(8*audio.sample_width - 1))
-            
-            normalized = raw.astype(np.float32) / max_val
-            return normalized
-            
+            step = max(1, len(raw) // 2000)
+            downsampled = raw[::step].astype(np.float32)
+            if audio.sample_width == 2:
+                return downsampled / 32768.0
+            return downsampled / float(2 ** (8 * audio.sample_width - 1))
         except Exception as e:
             self.error.emit("Waveform loader failed for {filepath}: {e}")
             return None
@@ -331,6 +338,7 @@ class MyTTSMainWindow(QMainWindow):
             
             # Connections
             self.synthesis_worker.progress.connect(self.update_progress)
+            self.synthesis_worker.detail_progress.connect(self.update_detail_progress)
             self.synthesis_worker.finished.connect(self.on_synthesis_finished)
             self.synthesis_worker.error.connect(self.on_synthesis_error)
             self.synthesis_worker.file_ready.connect(self.on_file_ready_for_playback)
@@ -388,6 +396,18 @@ class MyTTSMainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self._create_tabs()
         right_layout.addWidget(self.tabs, 1)
+
+        # 2.1.5 Progress Banner
+        self.progress_banner = QFrame()
+        self.progress_banner.setObjectName("ProgressBanner")
+        self.progress_banner.setFixedHeight(36)
+        self.progress_banner.setVisible(False)
+        banner_layout = QHBoxLayout(self.progress_banner)
+        banner_layout.setContentsMargins(10, 2, 10, 2)
+        self.progress_banner_label = QLabel("")
+        self.progress_banner_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        banner_layout.addWidget(self.progress_banner_label)
+        right_layout.addWidget(self.progress_banner)
 
         # 2.2 Footer Player
         self.footer = QWidget()
@@ -1078,108 +1098,56 @@ class MyTTSMainWindow(QMainWindow):
 
     # --- History ---
     def populate_history_table(self):
-        """Populates the QTreeWidget with history data (Smart Buttons)."""
+        self.history_tree.setUpdatesEnabled(False)
         self.history_tree.clear()
-        
-        # Iterate backwards (newest first)
         for idx, gen in enumerate(reversed(self.synthesis_results)):
             real_idx = len(self.synthesis_results) - 1 - idx
-            
             combined_path = gen.get("combined", "")
             chunks = gen.get("chunks", [])
             source_type = "Book" if gen.get("text_source") == "segmented" else "Quick"
             timestamp = time.strftime('%H:%M:%S', time.localtime(gen.get("timestamp", 0)))
-            
-            # Title logic
+            n_chunks = len(chunks)
             if source_type == "Book":
-                title = f"📖 Audiobook Gen #{real_idx+1} ({len(chunks)} segments)"
+                title = f"Gen #{real_idx+1} ({n_chunks} segs)"
             else:
-                first_text = chunks[0].get("graphemes", "") if chunks else "No Text"
-                title = f"📝 {first_text[:40]}..."
+                first_text = chunks[0].get("graphemes", "") if chunks else "?"
+                title = f"{first_text[:40]}..."
 
             top_item = QTreeWidgetItem([title, source_type, timestamp, ""])
             self.history_tree.addTopLevelItem(top_item)
             top_item.setExpanded(False)
-
-            # --- 1. Actions for Top Item (Combined) ---
             wid = QWidget()
             hlay = QHBoxLayout(wid)
             hlay.setContentsMargins(2, 2, 2, 2)
             hlay.setSpacing(5)
-            
-            # Play Button (Smart)
             btn_play = QPushButton("▶")
             btn_play.setFixedWidth(30)
             if combined_path and os.path.exists(combined_path):
-                btn_play.setToolTip(f"Play: {os.path.basename(combined_path)}")
+                btn_play.setToolTip(f"Play {os.path.basename(combined_path)}")
                 btn_play.clicked.connect(partial(self.play_audio_file, combined_path))
-                btn_play.setStyleSheet("color: #98c379; font-weight: bold;") 
+                btn_play.setStyleSheet("color: #98c379; font-weight: bold;")
             else:
-                btn_play.setEnabled(False) 
-                btn_play.setToolTip("File missing or deleted")
+                btn_play.setEnabled(False)
                 btn_play.setStyleSheet("color: #5c6370;")
-
-            # Save Button (Smart)
             btn_save = QPushButton("💾")
             btn_save.setFixedWidth(30)
             if combined_path and os.path.exists(combined_path):
                 btn_save.clicked.connect(partial(self.save_audio_dialog, f"gen_{real_idx}_full", combined_path))
             else:
                 btn_save.setEnabled(False)
-
-            # Delete Button (Винаги активен, за да триеш записа от историята)
             btn_del = QPushButton("❌")
             btn_del.setFixedWidth(30)
-            btn_del.setToolTip("Delete History Entry")
+            btn_del.setToolTip("Delete")
             btn_del.clicked.connect(partial(self.delete_history_item, real_idx))
-            
             hlay.addWidget(btn_play)
             hlay.addWidget(btn_save)
             hlay.addWidget(btn_del)
             self.history_tree.setItemWidget(top_item, 3, wid)
-
-            # --- 2. Add Children (Chunks) ---
             for i, chunk in enumerate(chunks):
                 chunk_text = chunk.get("graphemes", "???")
-                chunk_path = chunk.get("filepath", "")
-                
-                child_item = QTreeWidgetItem([f"   🗣️ {chunk_text[:60]}...", "Segment", f"#{i+1}", ""])
+                child_item = QTreeWidgetItem([f"   #{i+1} {chunk_text[:60]}...", "Seg", f"", ""])
                 top_item.addChild(child_item)
-                
-                wid_c = QWidget()
-                hlay_c = QHBoxLayout(wid_c)
-                hlay_c.setContentsMargins(2, 2, 2, 2)
-                hlay_c.setSpacing(5)
-                
-                # Chunk Play (Smart)
-                btn_play_c = QPushButton("▶")
-                btn_play_c.setFixedWidth(30)
-                if chunk_path and os.path.exists(chunk_path):
-                    btn_play_c.setToolTip("Play segment")
-                    btn_play_c.clicked.connect(partial(self.play_audio_file, chunk_path))
-                else:
-                    btn_play_c.setEnabled(False)
-                    btn_play_c.setToolTip("File cleaned up (Temp)")
-                    btn_play_c.setStyleSheet("color: #5c6370;")
-
-                # Copy Text (Винаги активно!)
-                btn_copy_c = QPushButton("📋")
-                btn_copy_c.setFixedWidth(30)
-                btn_copy_c.setToolTip("Copy text to clipboard")
-                btn_copy_c.clicked.connect(lambda _, t=chunk_text: QApplication.clipboard().setText(t))
-                
-                # Chunk Save (Smart)
-                btn_save_c = QPushButton("💾")
-                btn_save_c.setFixedWidth(30)
-                if chunk_path and os.path.exists(chunk_path):
-                    btn_save_c.clicked.connect(partial(self.save_audio_dialog, f"gen_{real_idx}_seg_{i}", chunk_path))
-                else:
-                    btn_save_c.setEnabled(False)
-
-                hlay_c.addWidget(btn_play_c)
-                hlay_c.addWidget(btn_copy_c)
-                hlay_c.addWidget(btn_save_c)
-                self.history_tree.setItemWidget(child_item, 3, wid_c)
+        self.history_tree.setUpdatesEnabled(True)
 
     def clear_history(self):
         self.synthesis_results.clear()
@@ -1374,13 +1342,20 @@ class MyTTSMainWindow(QMainWindow):
         return models.list_available_voices()
 
     def update_progress(self, curr, total):
-        """Updates UI during synthesis."""
+        """Updates UI during synthesis (segment-level)."""
+        self.progress_banner.setVisible(True)
         if curr == total:
-            self.statusBar().showMessage(f"Synthesis finished ({total}/{total}). Merging & Encoding MP3... Please wait!")
+            msg = "Finalizing combined audio..."
             self.setWindowTitle("Kokoro Studio - Finalizing...")
         else:
-            self.statusBar().showMessage(f"Processing segment {curr}/{total}...")
+            msg = f"Processing segment {curr}/{total}..."
             self.setWindowTitle(f"Kokoro Studio - {int((curr/total)*100)}%")
+        self.statusBar().showMessage(msg)
+
+    @Slot(str)
+    def update_detail_progress(self, msg):
+        self.progress_banner.setVisible(True)
+        self.progress_banner_label.setText(msg)
 
         # 2. AUTO-SCROLL
         if self.tabs.currentIndex() == 1:
@@ -1392,8 +1367,10 @@ class MyTTSMainWindow(QMainWindow):
                     self.book_table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def on_synthesis_finished(self, result):
+        self.progress_banner.setVisible(False)
         self.setWindowTitle("Kokoro Studio v2.0.1")
         self.statusBar().showMessage("Ready.")
+        self._play_completion_sound()
         if result:
             chunks_raw, combined = result
             if combined:
@@ -1448,6 +1425,13 @@ class MyTTSMainWindow(QMainWindow):
         h, m = divmod(m, 60)
         return h, m, s
 
+    def _play_completion_sound(self):
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            from PySide6.QtWidgets import QApplication
+            QApplication.beep()
 
     def _load_config(self, path):
         if os.path.exists(path):
@@ -1460,6 +1444,8 @@ class MyTTSMainWindow(QMainWindow):
             QMainWindow { background-color: #282c34; color: #abb2bf; font-family: Segoe UI, sans-serif; }
             QWidget#Sidebar { background-color: #21252b; border-right: 1px solid #181a1f; }
             QWidget#Footer { background-color: #21252b; border-top: 1px solid #181a1f; }
+            QFrame#ProgressBanner { background-color: #2c3e50; border-bottom: 2px solid #61afef; }
+            QFrame#ProgressBanner QLabel { color: #61afef; font-weight: bold; font-size: 13px; }
             QGroupBox { border: 1px solid #3e4451; margin-top: 1.5em; border-radius: 4px; font-weight: bold; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; color: #61afef; }
             QPushButton { background-color: #3e4451; border: none; padding: 6px; border-radius: 4px; color: white; }

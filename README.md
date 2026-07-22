@@ -24,8 +24,8 @@ We have simplified the installation process using `uv` for speed and reliability
 
 ### Option 1: The "One-Click" Method (Recommended)
 
-1.**Clone or Download** this repository.
-2.Double-click **`run.bat`**.
+1. **Clone or Download** this repository.
+2. Double-click **`run.bat`**.
 
 * This script will automatically set up a Python environment.
 * It will detect your NVIDIA driver version.
