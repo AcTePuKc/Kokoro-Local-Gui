@@ -74,14 +74,14 @@ class KokoroTTSWrapper:
         output_format: str = 'WAV',
         progress_callback: Optional[Callable[[int, int], None]] = None,
         detail_callback: Optional[Callable[[str], None]] = None
-    ) -> Tuple[List[Tuple[str, str, np.ndarray, str]], Optional[str]]:
+    ) -> Tuple[List[Tuple[str, str, str]], Optional[str]]:
         
         if not self.pipeline:
             raise RuntimeError("TTS Pipeline is not initialized.")
 
         logger.info(f"Starting synthesis. Speed: {speed}, Pitch: {pitch}, Rate: {sample_rate}")
 
-        synthesis_result_list: List[Tuple[str, str, np.ndarray, str]] = []
+        synthesis_result_list: List[Tuple[str, str, str]] = []
         combined_filepath: Optional[str] = None
         total_segments = len(segments)
         combined_sf = None
@@ -185,7 +185,7 @@ class KokoroTTSWrapper:
 
                                 graphemes = getattr(result, 'graphemes', None) or ""
                                 phonemes = getattr(result, 'phonemes', None) or ""
-                                synthesis_result_list.append((graphemes, phonemes, audio_data_numpy, chunk_filepath))
+                                synthesis_result_list.append((graphemes, phonemes, chunk_filepath))
                                 chunk_results_count += 1
                                 if detail_callback:
                                     audio_secs = len(audio_data_numpy) / DEFAULT_SAMPLERATE
@@ -212,7 +212,7 @@ class KokoroTTSWrapper:
             if target_format_upper == 'MP3' and synthesis_result_list:
                 logger.info(f"Merging {len(synthesis_result_list)} chunks into MP3...")
                 combined_audio = AudioSegment.empty()
-                for _, _, _, chunk_path in synthesis_result_list:
+                for _, _, chunk_path in synthesis_result_list:
                     combined_audio += AudioSegment.from_file(chunk_path)
                 combined_audio.export(combined_filepath, format='mp3', bitrate="192k")
                 logger.info(f"Combined MP3 saved: {combined_filepath}")

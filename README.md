@@ -108,6 +108,7 @@ The interface is divided into two main tabs:
 * **New NVIDIA GPUs / unsupported CUDA wheel**: Some very new cards may temporarily fail on GPU if the installed PyTorch build does not include kernels for that architecture yet. Kokoro Studio now falls back to CPU instead of crashing, so the app should still start.
 * **Voice Download Error**: On the first run, the app downloads model weights (~300MB) from HuggingFace. Ensure you have an internet connection.
 * **MP3 Issues**: If saving as MP3 fails, ensure `ffmpeg` is installed on your system (though `pydub` often handles this seamlessly).
+* **Long MP3 generations**: MP3 chunk merging currently builds one combined `AudioSegment` in memory. For very long audiobooks, WAV output uses less peak memory because it is written incrementally during synthesis.
 
 ## Contributors
 

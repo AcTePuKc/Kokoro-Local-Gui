@@ -188,19 +188,13 @@ class SynthesisWorker(QObject):
             elapsed = time.time() - self.start_time
             logger.info(f"Worker finished in {elapsed:.2f}s")
 
-            # Strip numpy arrays from signal data (not used by UI, kills perf for cross-thread signal)
-            light_results = (
-                [(g, p, None, fp) for g, p, _, fp in synthesis_result_list],
-                combined_filepath
-            )
-
             # Load waveform if combined file exists
             if combined_filepath and os.path.exists(combined_filepath):
                 waveform = self._load_waveform_data(combined_filepath)
                 if waveform is not None:
                     self.file_ready.emit(combined_filepath, waveform)
             
-            self.finished.emit(light_results)
+            self.finished.emit((synthesis_result_list, combined_filepath))
 
         except Exception as e:
             logger.exception("Worker Error")
@@ -233,7 +227,7 @@ class SynthesisWorker(QObject):
                     peak = np.max(np.abs(downsampled))
                     return downsampled / peak if peak > 1e-6 else downsampled
 
-            # ponytail: only load first 30s for non-WAV waveform (avoids decoding entire 1hr file)
+            # Limit non-WAV waveform decoding to the first 30 seconds.
             audio = AudioSegment.from_file(filepath, duration=30000)
             if audio.channels > 1:
                 audio = audio.set_channels(1)
@@ -244,7 +238,7 @@ class SynthesisWorker(QObject):
                 return downsampled / 32768.0
             return downsampled / float(2 ** (8 * audio.sample_width - 1))
         except Exception as e:
-            self.error.emit("Waveform loader failed for {filepath}: {e}")
+            self.error.emit(f"Waveform loader failed for {filepath}: {e}")
             return None
 
 class FileLoaderWorker(QObject):
@@ -1145,8 +1139,45 @@ class MyTTSMainWindow(QMainWindow):
             self.history_tree.setItemWidget(top_item, 3, wid)
             for i, chunk in enumerate(chunks):
                 chunk_text = chunk.get("graphemes", "???")
+                chunk_path = chunk.get("filepath", "")
                 child_item = QTreeWidgetItem([f"   #{i+1} {chunk_text[:60]}...", "Seg", f"", ""])
                 top_item.addChild(child_item)
+
+                wid_c = QWidget()
+                hlay_c = QHBoxLayout(wid_c)
+                hlay_c.setContentsMargins(2, 2, 2, 2)
+                hlay_c.setSpacing(5)
+
+                btn_play_c = QPushButton("▶")
+                btn_play_c.setFixedWidth(30)
+                if chunk_path and os.path.exists(chunk_path):
+                    btn_play_c.setToolTip("Play segment")
+                    btn_play_c.clicked.connect(partial(self.play_audio_file, chunk_path))
+                else:
+                    btn_play_c.setEnabled(False)
+                    btn_play_c.setToolTip("File cleaned up (Temp)")
+                    btn_play_c.setStyleSheet("color: #5c6370;")
+
+                btn_copy_c = QPushButton("📋")
+                btn_copy_c.setFixedWidth(30)
+                btn_copy_c.setToolTip("Copy text to clipboard")
+                btn_copy_c.clicked.connect(
+                    lambda _, text=chunk_text: QApplication.clipboard().setText(text)
+                )
+
+                btn_save_c = QPushButton("💾")
+                btn_save_c.setFixedWidth(30)
+                if chunk_path and os.path.exists(chunk_path):
+                    btn_save_c.clicked.connect(
+                        partial(self.save_audio_dialog, f"gen_{real_idx}_seg_{i}", chunk_path)
+                    )
+                else:
+                    btn_save_c.setEnabled(False)
+
+                hlay_c.addWidget(btn_play_c)
+                hlay_c.addWidget(btn_copy_c)
+                hlay_c.addWidget(btn_save_c)
+                self.history_tree.setItemWidget(child_item, 3, wid_c)
         self.history_tree.setUpdatesEnabled(True)
 
     def clear_history(self):
@@ -1257,8 +1288,7 @@ class MyTTSMainWindow(QMainWindow):
         self.current_filepath = filepath
         self.media_player.setSource(QUrl.fromLocalFile(filepath))
         
-        # Тук виждам, че се опитваш да ползваш self._load_waveform_data
-        # Но този метод май липсва в класа (виж стъпка 3 долу)
+        # The worker has already decoded and downsampled the waveform data.
         if hasattr(self, 'waveform_widget'):
              self.waveform_widget.set_waveform(waveform)
              
@@ -1352,19 +1382,21 @@ class MyTTSMainWindow(QMainWindow):
             self.setWindowTitle(f"Kokoro Studio - {int((curr/total)*100)}%")
         self.statusBar().showMessage(msg)
 
-    @Slot(str)
-    def update_detail_progress(self, msg):
-        self.progress_banner.setVisible(True)
-        self.progress_banner_label.setText(msg)
-
-        # 2. AUTO-SCROLL
         if self.tabs.currentIndex() == 1:
-            row = curr - 1 
+            row = curr - 1
             if 0 <= row < self.book_table.rowCount():
                 self.book_table.selectRow(row)
                 item = self.book_table.item(row, 0)
                 if item:
-                    self.book_table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+                    self.book_table.scrollToItem(
+                        item,
+                        QAbstractItemView.ScrollHint.PositionAtCenter,
+                    )
+
+    @Slot(str)
+    def update_detail_progress(self, msg):
+        self.progress_banner.setVisible(True)
+        self.progress_banner_label.setText(msg)
 
     def on_synthesis_finished(self, result):
         self.progress_banner.setVisible(False)
@@ -1377,11 +1409,11 @@ class MyTTSMainWindow(QMainWindow):
                 # [CRITICAL FIX] Convert result Tuples to Dicts for JSON saving
                 clean_chunks = []
                 for c in chunks_raw:
-                    # c is (graphemes, phonemes, numpy_array, filepath)
+                    # c is (graphemes, phonemes, filepath)
                     clean_chunks.append({
                         "graphemes": c[0],
                         "phonemes": c[1],
-                        "filepath": c[3] # Skip c[2] (numpy)
+                        "filepath": c[2]
                     })
                 
                 self.synthesis_results.append({
