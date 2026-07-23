@@ -7,6 +7,7 @@ It creates high-quality audio instantly, runs entirely offline, and supports GPU
 > **v2.0 Major Update:** Complete UI overhaul, Audiobook mode, Voice Mixing, Project Saving, and EPUB support!
 
 > **v2.0.1 Patch:** Improved CUDA/PyTorch detection, safer CPU fallback, cleaner reinstall flow, and startup crash fixes.
+
 > **v2.0.2 Patch:** Improved synthesis progress reporting, reduced WAV memory usage, optimized waveform rendering, and restored per-segment history actions.
 
 ## 🚀 Key Features
