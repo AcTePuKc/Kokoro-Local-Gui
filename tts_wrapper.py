@@ -72,42 +72,39 @@ class KokoroTTSWrapper:
         embedding_scale: float = 1.0,
         sample_rate: int = DEFAULT_SAMPLERATE,
         output_format: str = 'WAV',
-        progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> Tuple[List[Tuple[str, str, np.ndarray, str]], Optional[str]]:
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        detail_callback: Optional[Callable[[str], None]] = None
+    ) -> Tuple[List[Tuple[str, str, str]], Optional[str]]:
         
         if not self.pipeline:
             raise RuntimeError("TTS Pipeline is not initialized.")
 
         logger.info(f"Starting synthesis. Speed: {speed}, Pitch: {pitch}, Rate: {sample_rate}")
 
-        all_audio_tensors: List[torch.Tensor] = []
-        synthesis_result_list: List[Tuple[str, str, np.ndarray, str]] = []
+        synthesis_result_list: List[Tuple[str, str, str]] = []
         combined_filepath: Optional[str] = None
         total_segments = len(segments)
+        combined_sf = None
+        target_format_upper = output_format.upper()
 
         try:
             # --- 1. Pre-load Voices (Standardized) ---
-            # We must resolve all friendly names to internal names first
             voice_map = {}
             unique_internal_voices_needed = set()
 
             for _, segment_voices, _ in segments:
                 for v_str in segment_voices:
-                    # Handle "VoiceA+VoiceB" from UI
                     parts = v_str.split('+')
                     resolved_parts = []
                     for part in parts:
-                        clean_part = part.split(':')[0].strip() # Remove weights if any
+                        clean_part = part.split(':')[0].strip()
                         internal = get_internal_voice_name(clean_part)
                         if not internal:
-                            # Fallback for custom files
                             internal = clean_part.lower().replace(" ", "_")
                         
                         unique_internal_voices_needed.add(internal)
                         resolved_parts.append(internal)
                     
-                    # Map the full UI string to a COMMA-separated internal string
-                    # e.g., "Alice+Bob" -> "bf_alice,bm_bob"
                     voice_map[v_str] = ",".join(resolved_parts)
 
             logger.info(f"Pre-loading {len(unique_internal_voices_needed)} voices: {unique_internal_voices_needed}")
@@ -118,15 +115,17 @@ class KokoroTTSWrapper:
                     logger.error(f"Failed to load voice {internal_name}: {str(load_error)}")
                     pass 
 
+            # Determine combined file path early
+            combined_timestamp = time.strftime("%Y%m%d_%H%M%S")
+            combined_filename = f"combined_{combined_timestamp}.{output_format.lower()}"
+            combined_filepath = os.path.join(self.output_dir, combined_filename)
+
             # --- 2. Process Segments ---
             for i, (text_chunk, segment_voices, weight_str) in enumerate(segments):
                 segment_num = i + 1
                 if not text_chunk.strip(): 
                     continue
 
-                # Get the comma-separated spec we built earlier
-                # If segment_voices is ['Alice+Bob'], we get 'bf_alice,bm_bob'
-                # If multiple entries (rare in your UI logic), join them with comma too
                 internal_specs = [voice_map.get(v, v) for v in segment_voices]
                 blended_voice_spec = ",".join(internal_specs)
                 
@@ -134,13 +133,11 @@ class KokoroTTSWrapper:
                 
                 chunk_results_count = 0
                 try:
-                    # Kwargs for pipeline
                     generate_kwargs = {
                         "voice": blended_voice_spec,
                         "speed": speed,
                     }
                     
-                    # Advanced params logging
                     if diffusion_steps > 0 or alpha > 0 or beta > 0:
                         logger.debug("Advanced style params ignored (not supported by current Kokoro build).")
 
@@ -162,7 +159,6 @@ class KokoroTTSWrapper:
                                             sr=DEFAULT_SAMPLERATE, 
                                             n_steps=n_steps
                                         )
-                                        audio_tensor = torch.from_numpy(audio_data_numpy)
                                     except Exception as e_pitch:
                                         logger.error(f"Pitch shift failed: {e_pitch}")
 
@@ -173,11 +169,27 @@ class KokoroTTSWrapper:
                                 # Save Chunk (WAV, Resampled)
                                 self.save_audio(audio_data_numpy, chunk_filepath, format='WAV', target_sample_rate=sample_rate)
 
+                                # Stream chunk to combined WAV file (avoids holding all audio in memory)
+                                if target_format_upper == 'WAV':
+                                    if combined_sf is None:
+                                        os.makedirs(os.path.dirname(combined_filepath), exist_ok=True)
+                                        combined_sf = sf.SoundFile(
+                                            combined_filepath, mode='w',
+                                            samplerate=sample_rate,
+                                            channels=1, format='WAV', subtype='PCM_16'
+                                        )
+                                    data_to_write = audio_data_numpy
+                                    if sample_rate != DEFAULT_SAMPLERATE:
+                                        data_to_write = librosa.resample(data_to_write, orig_sr=DEFAULT_SAMPLERATE, target_sr=sample_rate)
+                                    combined_sf.write(np.clip(data_to_write, -1.0, 1.0))
+
                                 graphemes = getattr(result, 'graphemes', None) or ""
                                 phonemes = getattr(result, 'phonemes', None) or ""
-                                synthesis_result_list.append((graphemes, phonemes, audio_data_numpy, chunk_filepath))
-                                all_audio_tensors.append(audio_tensor)
+                                synthesis_result_list.append((graphemes, phonemes, chunk_filepath))
                                 chunk_results_count += 1
+                                if detail_callback:
+                                    audio_secs = len(audio_data_numpy) / DEFAULT_SAMPLERATE
+                                    detail_callback(f"Seg {segment_num}/{total_segments} — chunk {chunk_results_count} ({audio_secs:.1f}s)")
                                 
                             except Exception as proc_err:
                                 logger.exception(f"Error processing chunk for seg {segment_num}: {proc_err}")
@@ -187,27 +199,36 @@ class KokoroTTSWrapper:
                     logger.exception(f"Pipeline error seg {segment_num}: {synth_call_err}")
                     raise
 
+                if detail_callback:
+                    detail_callback(f"Seg {segment_num}/{total_segments} done ({chunk_results_count} chunks)")
                 if progress_callback:
                     progress_callback(segment_num, total_segments)
 
             # --- 3. Final Combination ---
-            if all_audio_tensors:
-                logger.info(f"Combining {len(all_audio_tensors)} audio chunks...")
-                combined_audio_tensor = torch.cat(all_audio_tensors, dim=0)
-                combined_audio_numpy = combined_audio_tensor.cpu().float().numpy()
-                
-                combined_timestamp = time.strftime("%Y%m%d_%H%M%S")
-                combined_filename = f"combined_{combined_timestamp}.{output_format.lower()}"
-                combined_filepath = os.path.join(self.output_dir, combined_filename)
-                
-                # Save Final (User Format, Resampled)
-                self.save_audio(combined_audio_numpy, combined_filepath, format=output_format, target_sample_rate=sample_rate)
-                logger.info(f"Combined audio saved: {combined_filepath}")
-            else:
+            if combined_sf is not None:
+                combined_sf.close()
+                logger.info(f"Combined WAV saved via streaming: {combined_filepath}")
+
+            if target_format_upper == 'MP3' and synthesis_result_list:
+                logger.info(f"Merging {len(synthesis_result_list)} chunks into MP3...")
+                combined_audio = AudioSegment.empty()
+                for _, _, chunk_path in synthesis_result_list:
+                    combined_audio += AudioSegment.from_file(chunk_path)
+                combined_audio.export(combined_filepath, format='mp3', bitrate="192k")
+                logger.info(f"Combined MP3 saved: {combined_filepath}")
+
+            if combined_sf is None and not os.path.exists(combined_filepath):
                 combined_filepath = None
 
         except Exception as e:
             logger.exception(f"Synthesis failed: {e}")
+            if combined_sf is not None:
+                combined_sf.close()
+            if combined_filepath and os.path.exists(combined_filepath):
+                try:
+                    os.remove(combined_filepath)
+                except OSError:
+                    pass
             raise
 
         logger.info("Synthesis complete.")
