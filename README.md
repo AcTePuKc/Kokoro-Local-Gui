@@ -1,4 +1,4 @@
-# Kokoro Studio v2.0.1 (Local GPU TTS)
+# Kokoro Studio v2.0.2 (Local GPU TTS)
 
 **Kokoro Studio** is a professional-grade, local Text-to-Speech application powered by the **Kokoro-82M** model.
 
@@ -7,16 +7,18 @@ It creates high-quality audio instantly, runs entirely offline, and supports GPU
 > **v2.0 Major Update:** Complete UI overhaul, Audiobook mode, Voice Mixing, Project Saving, and EPUB support!
 
 > **v2.0.1 Patch:** Improved CUDA/PyTorch detection, safer CPU fallback, cleaner reinstall flow, and startup crash fixes.
+> **v2.0.2 Patch:** Improved synthesis progress reporting, reduced WAV memory usage, optimized waveform rendering, and restored per-segment history actions.
 
 ## 🚀 Key Features
 
-* **⚡ Hyper-Fast Inference:** Generates audio in real-time (or faster) using **NVIDIA GPU (CUDA)**. Falls back to CPU if no GPU is found.
+* **⚡ GPU-Accelerated Inference:** Uses **NVIDIA CUDA** when available for faster synthesis and automatically falls back to CPU when necessary.
 * **📚 Audiobook Mode:** Load **TXT** or **EPUB** books. The app splits them into segments for easy management.
 * **🎛️ Voice Mixing:** Combine two voices (e.g., *Alice + George*) to create unique character blends.
 * **💾 Project System:** Save your work (`.kproj`). Keep your voice assignments and text segments to continue working later.
 * **🛠️ Fine Control:** Adjust **Speed**, **Pitch**, and **Sample Rate** (24kHz, 16kHz, etc.) per project or globally.
 * **🖱️ Drag & Drop:** Drop text files or project files directly into the window to load them.
-* **🎵 Integrated Player:** Play specific segments, preview audio, or listen to the full combined track with a visual waveform.
+* **🎵 Integrated Player and History:** Preview individual segments, play completed generations, save selected audio, copy segment text, and view a lightweight waveform.
+* **📊 Detailed Progress Tracking:** Follow the current segment, generated chunk count, and synthesis progress while longer jobs are running.
 
 ## 📦 Installation (Windows)
 
@@ -28,8 +30,8 @@ We have simplified the installation process using `uv` for speed and reliability
 2. Double-click **`run.bat`**.
 
 * This script will automatically set up a Python environment.
-* It will detect your NVIDIA driver version.
-* It will install the correct version of **PyTorch (CUDA)** for your hardware.
+* It will detect your NVIDIA driver and supported CUDA configuration.
+* It will install a compatible **PyTorch CUDA** build when available.
 * It will launch the application.
 * If PyTorch is already installed correctly, it will skip reinstalling it.
 
@@ -52,9 +54,9 @@ run.bat
 
 If you prefer managing your own environment:
 
-```bash
+```bat
 # 1. Create and activate a virtual environment
-uv venv .venv --python python3.11
+uv venv .venv --python 3.11
 .venv\Scripts\activate
 
 # 2. Install basic dependencies
@@ -84,31 +86,33 @@ The interface is divided into two main tabs:
 * **Per-Line Control:** Assign different voices to different lines (great for dialogue).
 * **Preview:** Click the **▶** button on any row to hear just that sentence.
 * **Render:** Click **Render Audiobook** to generate and merge all lines into one MP3/WAV file.
+* **Progress Display:** During synthesis, the interface shows the active segment, generated chunk count, and overall progress.
 
 ### Sidebar Controls
 
 * **Primary Voice:** The main speaker.
 * **Mix Voice:** Check this to blend a secondary voice (50/50 mix).
-* **Audio Props:** Change Speed, Pitch, and Target Hz (Sample Rate).
-* **System:** View your current device (GPU/CPU) and set a Seed for reproducibility.
+* **Audio Properties:** Adjust Speed, Pitch, and Target Sample Rate.
+* **System:** View the active processing device (GPU or CPU) and set a seed for repeatable generation.
 
 ## 📂 File Structure
 
 * `main.py`: Entry point.
 * `ui_main.py`: The graphical interface (PySide6).
-* `tts_wrapper.py`: Connects the UI to the Kokoro model (handling inference, mixing, resampling).
+* `tts_wrapper.py`: Connects the UI to the Kokoro model and handles inference, voice mixing, resampling, chunk output, and combined audio generation.
 * `models.py`: Definitions of available voices.
 * `persistence.py`: Handles saving/loading projects and history.
 * `install_torch_uv.py`: Helper script to auto-detect and install CUDA support.
 * `run.bat`: Windows launcher script.
+* `tests/`: Regression tests for synthesis metadata, progress handling, waveform errors, and History controls.
 
 ## ⚠️ Troubleshooting
 
 * **"Device: CPU (Slow)"**: If the app shows this label in yellow, CUDA is either not available or the installed PyTorch CUDA build is not compatible with your GPU. Run `run.bat reinstall` to force a PyTorch reinstall, or rebuild from a clean `.venv`.
 * **New NVIDIA GPUs / unsupported CUDA wheel**: Some very new cards may temporarily fail on GPU if the installed PyTorch build does not include kernels for that architecture yet. Kokoro Studio now falls back to CPU instead of crashing, so the app should still start.
-* **Voice Download Error**: On the first run, the app downloads model weights (~300MB) from HuggingFace. Ensure you have an internet connection.
-* **MP3 Issues**: If saving as MP3 fails, ensure `ffmpeg` is installed on your system (though `pydub` often handles this seamlessly).
-* **Long MP3 generations**: MP3 chunk merging currently builds one combined `AudioSegment` in memory. For very long audiobooks, WAV output uses less peak memory because it is written incrementally during synthesis.
+* **Voice Download Error**: On the first run, the app downloads model weights (~300 MB) from Hugging Face. Ensure you have an internet connection.
+* **MP3 Issues**: If MP3 export or playback fails, ensure that `ffmpeg` is installed and available in your system `PATH`.
+* **Long MP3 generations**: MP3 chunk merging currently creates one combined `AudioSegment` in memory. For long audiobooks, WAV output generally uses less peak memory because audio is written incrementally during synthesis.
 
 ## Contributors
 
@@ -119,6 +123,7 @@ Thanks to everyone who helped build and improve Kokoro Studio:
 | Shteryan Nikolaev | Project maintainer and core development |
 | WilleIshere | Community code contributions |
 | dsovven | CUDA/PyTorch startup improvements |
+| syedusama5556 | Synthesis progress, memory usage, waveform, and history UI improvements |
 
 ## License
 
