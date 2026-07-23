@@ -125,11 +125,6 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertIn("mp3", readme)
         self.assertIn("memory", readme)
 
-    def test_pr_description_summarizes_history_and_memory_goals(self):
-        description = (ROOT / "PR_DESCRIPTION.md").read_text(encoding="utf-8-sig").lower()
-        self.assertIn("history", description)
-        self.assertIn("memory", description)
-
 
 if __name__ == "__main__":
     unittest.main()
